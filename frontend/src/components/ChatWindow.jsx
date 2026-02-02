@@ -5,13 +5,15 @@ import './ChatWindow.css';
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 function ChatWindow() {
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      sender: 'bot',
-      text: "Hi! I'm the TechGear Support Chatbot. Ask me about our products, returns, or support hours."
-    }
-  ]);
+  const initialMessage = {
+    id: 1,
+    sender: 'bot',
+    text: "Hi! I'm the TechGear Support Chatbot. Ask me about our products, returns, or support hours.",
+    timestamp: new Date().toISOString(),
+    category: null
+  };
+
+  const [messages, setMessages] = useState([initialMessage]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -37,7 +39,9 @@ function ChatWindow() {
     const userMessage = {
       id: nextIdRef.current++,
       sender: 'user',
-      text: trimmedMessage
+      text: trimmedMessage,
+      timestamp: new Date().toISOString(),
+      category: null
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -45,12 +49,21 @@ function ChatWindow() {
     setIsLoading(true);
 
     try {
+      // Prepare history: send last 4 messages (excluding the current user message)
+      const historyToSend = messages.slice(-4).map(msg => ({
+        sender: msg.sender,
+        text: msg.text
+      }));
+
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query: trimmedMessage }),
+        body: JSON.stringify({ 
+          query: trimmedMessage,
+          history: historyToSend
+        }),
       });
 
       if (!response.ok) {
@@ -59,11 +72,13 @@ function ChatWindow() {
 
       const data = await response.json();
 
-      // Add bot response to chat
+      // Add bot response to chat with category
       const botMessage = {
         id: nextIdRef.current++,
         sender: 'bot',
-        text: data.response || 'Sorry, I received an empty response.'
+        text: data.response || 'Sorry, I received an empty response.',
+        timestamp: new Date().toISOString(),
+        category: data.category || null
       };
 
       setMessages(prev => [...prev, botMessage]);
@@ -75,7 +90,9 @@ function ChatWindow() {
       const errorMessage = {
         id: nextIdRef.current++,
         sender: 'bot',
-        text: "Sorry, I couldn't reach the server. Please try again in a moment."
+        text: "Sorry, I couldn't reach the server. Please try again in a moment.",
+        timestamp: new Date().toISOString(),
+        category: null
       };
 
       setMessages(prev => [...prev, errorMessage]);
@@ -91,14 +108,35 @@ function ChatWindow() {
     }
   };
 
+  const handleClearChat = () => {
+    // Reset to initial state with welcome message
+    setMessages([initialMessage]);
+    nextIdRef.current = 2;
+    setError(null);
+    setInputValue('');
+  };
+
   return (
     <div className="chat-window">
+      <div className="chat-header">
+        <h2>Chat</h2>
+        <button 
+          onClick={handleClearChat}
+          className="clear-button"
+          title="Clear chat and start new session"
+        >
+          Clear Chat
+        </button>
+      </div>
+      
       <div className="messages-container">
         {messages.map((message) => (
           <MessageBubble
             key={message.id}
             sender={message.sender}
             text={message.text}
+            timestamp={message.timestamp}
+            category={message.category}
           />
         ))}
         

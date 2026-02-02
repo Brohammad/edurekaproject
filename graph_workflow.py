@@ -4,7 +4,8 @@ TASK 3: LangGraph Workflow Implementation
 - Conditional routing
 - RAG response or escalation
 """
-from typing import Dict, Literal, TypedDict
+import logging
+from typing import Dict, Literal, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
@@ -12,9 +13,13 @@ from langchain_core.prompts import PromptTemplate
 import config
 from rag_pipeline import answer_with_rag
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 
 class GraphState(TypedDict):
     query: str
+    history: str
     category: str
     response: str
 
@@ -45,6 +50,21 @@ class ChatbotWorkflow:
         """
         query = state.get("query", "")
         
+        # Pre-check for out-of-scope queries using rule-based checks
+        out_of_scope_keywords = [
+            "lawsuit", "legal", "sue", "court", "lawyer",
+            "broken screen", "repair my", "fix my device",
+            "payment failed", "payment error", "charged twice",
+            "spam", "abuse", "hate", "scam"
+        ]
+        
+        query_lower = query.lower()
+        for keyword in out_of_scope_keywords:
+            if keyword in query_lower:
+                logger.info(f"Query matched out-of-scope keyword: {keyword}")
+                state["category"] = "escalate"
+                return state
+        
         # Classification prompt
         classification_prompt = PromptTemplate(
             template="""You are a query classifier for TechGear Electronics customer support.
@@ -52,7 +72,7 @@ Classify the following customer query into EXACTLY ONE of these categories:
 - "products": Questions about product features, prices, specifications, warranty
 - "returns": Questions about return policy, refunds, return process
 - "general": Questions about support hours, contact information, general inquiries
-- "escalate": Complex issues, complaints, requests that need human intervention, or unclear queries
+- "escalate": Complex issues, complaints, payment problems, device repairs not in knowledge base, abusive messages, or unclear queries
 
 Output ONLY the category name, nothing else.
 
@@ -72,7 +92,7 @@ Category:""",
             # Default to escalate if unclear
             category = "escalate"
         
-        print(f"Classified query as: {category}")
+        logger.info(f"Classified query as: {category}")
         state["category"] = category
         return state
     
@@ -88,9 +108,10 @@ Category:""",
             Updated state with response
         """
         query = state.get("query", "")
+        history = state.get("history", "")
         
-        print("Generating response using RAG...")
-        response = answer_with_rag(query)
+        logger.info("Generating response using RAG...")
+        response = answer_with_rag(query, history)
         
         state["response"] = response
         return state
@@ -98,7 +119,7 @@ Category:""",
     def escalation_handler(self, state: Dict) -> Dict:
         """
         Node 3: Escalation
-        Return a fixed escalation message for queries that need human support.
+        Return a standardized escalation message for queries that need human support.
         
         Args:
             state: Current workflow state
@@ -106,12 +127,11 @@ Category:""",
         Returns:
             Updated state with escalation message
         """
-        print("Escalating to human support...")
+        logger.info("Escalating to human support...")
         
         escalation_message = (
             "I'm not able to handle this request. "
-            "Please contact support@techgear.com or call customer support "
-            "for further assistance. Our support team is available Mon-Sat, 9AM-6PM IST."
+            "Please contact support@techgear.com or call customer support for further assistance."
         )
         
         state["response"] = escalation_message
@@ -169,19 +189,32 @@ Category:""",
         # Compile the graph
         return workflow.compile()
     
-    def run(self, query: str) -> str:
+    def run(self, query: str, history: Optional[List[Dict]] = None) -> Dict:
         """
-        Run the workflow for a given query.
+        Run the workflow for a given query with optional conversation history.
         
         Args:
             query: User's question
+            history: Optional list of previous messages [{"sender": "user"|"bot", "text": "..."}]
             
         Returns:
-            Chatbot response
+            Dict with response and category
         """
+        # Format history into a string
+        history_str = ""
+        if history:
+            history_lines = []
+            for msg in history[-4:]:  # Only use last 4 messages
+                sender = "User" if msg.get("sender") == "user" else "Bot"
+                text = msg.get("text", "")
+                history_lines.append(f"{sender}: {text}")
+            history_str = "\n".join(history_lines)
+            logger.info(f"Using conversation history with {len(history[-4:])} messages")
+        
         # Initialize state
         initial_state = {
             "query": query,
+            "history": history_str,
             "category": "",
             "response": ""
         }
@@ -189,7 +222,10 @@ Category:""",
         # Execute workflow
         final_state = self.graph.invoke(initial_state)
         
-        return final_state.get("response", "")
+        return {
+            "response": final_state.get("response", ""),
+            "category": final_state.get("category", "")
+        }
 
 
 # Global workflow instance
@@ -205,21 +241,22 @@ def get_workflow() -> ChatbotWorkflow:
     """
     global _workflow
     if _workflow is None:
-        print("Initializing LangGraph workflow...")
+        logger.info("Initializing LangGraph workflow...")
         _workflow = ChatbotWorkflow()
-        print("Workflow initialized!")
+        logger.info("Workflow initialized!")
     return _workflow
 
 
-def run_chatbot_flow(query: str) -> str:
+def run_chatbot_flow(query: str, history: Optional[List[Dict]] = None) -> Dict:
     """
     Convenience function to run the chatbot workflow.
     
     Args:
         query: User's question
+        history: Optional conversation history
         
     Returns:
-        Chatbot response
+        Dict with response and category
     """
     workflow = get_workflow()
-    return workflow.run(query)
+    return workflow.run(query, history)

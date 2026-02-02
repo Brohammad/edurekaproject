@@ -3,8 +3,14 @@ TASK 1 & 2: RAG Pipeline Implementation
 - Document loading and vector store creation
 - RAG chain for question answering
 """
+# Fix for SQLite version compatibility on Linux
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
 import os
-from typing import List
+import logging
+from typing import List, Tuple
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_chroma import Chroma
@@ -14,6 +20,12 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 import config
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Relevance threshold for retrieved documents
+RELEVANCE_THRESHOLD = 0.4  # Adjust based on your embedding model's score range
 
 
 class RAGPipeline:
@@ -32,7 +44,7 @@ class RAGPipeline:
         Returns:
             List of Document objects
         """
-        print(f"Loading documents from {config.KNOWLEDGE_BASE_PATH}...")
+        logger.info(f"Loading documents from {config.KNOWLEDGE_BASE_PATH}...")
         
         if not os.path.exists(config.KNOWLEDGE_BASE_PATH):
             raise FileNotFoundError(f"Knowledge base file not found: {config.KNOWLEDGE_BASE_PATH}")
@@ -42,7 +54,7 @@ class RAGPipeline:
         
         # Create a single document
         documents = [Document(page_content=content, metadata={"source": config.KNOWLEDGE_BASE_PATH})]
-        print(f"Loaded {len(documents)} document(s)")
+        logger.info(f"Loaded {len(documents)} document(s)")
         return documents
     
     def split_documents(self, documents: List[Document]) -> List[Document]:
@@ -55,7 +67,7 @@ class RAGPipeline:
         Returns:
             List of chunked documents
         """
-        print("Splitting documents into chunks...")
+        logger.info("Splitting documents into chunks...")
         
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.CHUNK_SIZE,
@@ -65,7 +77,7 @@ class RAGPipeline:
         )
         
         chunks = text_splitter.split_documents(documents)
-        print(f"Created {len(chunks)} chunks")
+        logger.info(f"Created {len(chunks)} chunks")
         return chunks
     
     def create_vector_store(self, chunks: List[Document]) -> Chroma:
@@ -78,7 +90,7 @@ class RAGPipeline:
         Returns:
             ChromaDB vector store
         """
-        print("Creating embeddings and vector store...")
+        logger.info("Creating embeddings and vector store...")
         
         # Initialize Google embeddings
         embeddings = GoogleGenerativeAIEmbeddings(
@@ -94,24 +106,27 @@ class RAGPipeline:
             persist_directory=config.CHROMA_PERSIST_DIRECTORY
         )
         
-        print("Vector store created successfully")
+        logger.info("Vector store created successfully")
         return vectorstore
     
     def setup_rag_chain(self):
         """
         Set up the complete RAG chain with retriever and LLM.
         """
-        print("Setting up RAG chain...")
+        logger.info("Setting up RAG chain...")
         
         # Load and process documents
         documents = self.load_documents()
         chunks = self.split_documents(documents)
         self.vectorstore = self.create_vector_store(chunks)
         
-        # Create retriever
+        # Create retriever - we'll use similarity_score_threshold for relevance filtering
         self.retriever = self.vectorstore.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 3}  # Retrieve top 3 relevant chunks
+            search_type="similarity_score_threshold",
+            search_kwargs={
+                "k": 3,  # Retrieve top 3 relevant chunks
+                "score_threshold": RELEVANCE_THRESHOLD
+            }
         )
         
         # Initialize Gemini Flash 2.5 LLM
@@ -137,34 +152,85 @@ Answer:"""
             input_variables=["context", "question"]
         )
         
-        # Create RAG chain using LCEL
-        def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
-        
-        self.rag_chain = (
-            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-            | self.prompt
-            | self.llm
-            | StrOutputParser()
-        )
-        
-        print("RAG chain setup complete!")
+        logger.info("RAG chain setup complete!")
     
-    def answer_with_rag(self, question: str) -> str:
+    def retrieve_with_scores(self, question: str) -> Tuple[List[Document], bool]:
         """
-        Answer a question using the RAG chain.
+        Retrieve documents and determine if context is sufficient.
         
         Args:
             question: User's question
             
         Returns:
-            Generated answer
+            Tuple of (documents, has_reliable_context)
         """
-        if self.rag_chain is None:
+        if self.vectorstore is None:
+            raise ValueError("Vector store not initialized.")
+        
+        # Get documents with similarity scores
+        docs_with_scores = self.vectorstore.similarity_search_with_relevance_scores(
+            question, k=3
+        )
+        
+        logger.info(f"Retrieved {len(docs_with_scores)} documents")
+        
+        # Check if we have reliable context
+        has_reliable_context = (
+            len(docs_with_scores) > 0 and 
+            docs_with_scores[0][1] >= RELEVANCE_THRESHOLD
+        )
+        
+        if has_reliable_context:
+            logger.info(f"Found reliable context with score: {docs_with_scores[0][1]:.3f}")
+        else:
+            best_score = docs_with_scores[0][1] if docs_with_scores else 0.0
+            logger.warning(f"No reliable context found. Best score: {best_score:.3f}")
+        
+        # Extract just the documents
+        docs = [doc for doc, score in docs_with_scores]
+        
+        return docs, has_reliable_context
+    
+    def answer_with_rag(self, question: str, history: str = "") -> str:
+        """
+        Answer a question using the RAG chain with conversation history support.
+        
+        Args:
+            question: User's question
+            history: Optional conversation history context
+            
+        Returns:
+            Generated answer or fallback message
+        """
+        if self.llm is None:
             raise ValueError("RAG chain not initialized. Call setup_rag_chain() first.")
         
-        result = self.rag_chain.invoke(question)
-        return result
+        # Retrieve documents and check relevance
+        docs, has_reliable_context = self.retrieve_with_scores(question)
+        
+        # If no reliable context, return fallback message
+        if not has_reliable_context:
+            logger.info("Using fallback response due to insufficient context")
+            return (
+                "I don't have specific information about that in TechGear's knowledge base. "
+                "Please contact support@techgear.com for more details."
+            )
+        
+        # Format context
+        context = "\n\n".join(doc.page_content for doc in docs)
+        
+        # Include history if provided
+        if history:
+            enhanced_question = f"Conversation history:\n{history}\n\nCurrent question: {question}"
+            logger.info(f"Using conversation history (length: {len(history)} chars)")
+        else:
+            enhanced_question = question
+        
+        # Generate response using LLM
+        prompt_text = self.prompt.format(context=context, question=enhanced_question)
+        result = self.llm.invoke(prompt_text)
+        
+        return result.content
 
 
 # Global instance
@@ -180,20 +246,22 @@ def get_rag_pipeline() -> RAGPipeline:
     """
     global _rag_pipeline
     if _rag_pipeline is None:
+        logger.info("Initializing RAG pipeline...")
         _rag_pipeline = RAGPipeline()
         _rag_pipeline.setup_rag_chain()
     return _rag_pipeline
 
 
-def answer_with_rag(question: str) -> str:
+def answer_with_rag(question: str, history: str = "") -> str:
     """
     Convenience function to answer questions using RAG.
     
     Args:
         question: User's question
+        history: Optional conversation history
         
     Returns:
         Generated answer
     """
     pipeline = get_rag_pipeline()
-    return pipeline.answer_with_rag(question)
+    return pipeline.answer_with_rag(question, history)

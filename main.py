@@ -45,11 +45,19 @@ SETUP INSTRUCTIONS:
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict
 import uvicorn
+import logging
 
 from graph_workflow import run_chatbot_flow
 from rag_pipeline import get_rag_pipeline
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -69,14 +77,28 @@ app.add_middleware(
 
 
 # Request/Response Models
+class HistoryMessage(BaseModel):
+    """Individual message in conversation history."""
+    sender: str = Field(..., description="Message sender: 'user' or 'bot'")
+    text: str = Field(..., description="Message content")
+
+
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
     query: str = Field(..., description="Customer's question or query", min_length=1)
+    history: Optional[List[HistoryMessage]] = Field(
+        default=None,
+        description="Optional conversation history for context"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "query": "What is the price of SmartWatch Pro X?"
+                "query": "What is the price of SmartWatch Pro X?",
+                "history": [
+                    {"sender": "user", "text": "Tell me about your smartwatches"},
+                    {"sender": "bot", "text": "We have the SmartWatch Pro X..."}
+                ]
             }
         }
 
@@ -84,11 +106,16 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     response: str = Field(..., description="Chatbot's response to the query")
+    category: Optional[str] = Field(
+        default=None,
+        description="Query category: products, returns, general, or escalate"
+    )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "response": "The SmartWatch Pro X is priced at ₹15,999."
+                "response": "The SmartWatch Pro X is priced at ₹15,999.",
+                "category": "products"
             }
         }
 
@@ -103,13 +130,13 @@ class HealthResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the RAG pipeline on app startup."""
-    print("Starting up TechGear Support Chatbot...")
+    logger.info("Starting up TechGear Support Chatbot...")
     try:
         # Initialize RAG pipeline (this loads documents and creates vector store)
         get_rag_pipeline()
-        print("RAG pipeline initialized successfully!")
+        logger.info("RAG pipeline initialized successfully!")
     except Exception as e:
-        print(f"Error initializing RAG pipeline: {e}")
+        logger.error(f"Error initializing RAG pipeline: {e}")
         raise
 
 
@@ -139,26 +166,38 @@ async def chat(request: ChatRequest):
     The workflow:
     1. Classifies the query (products, returns, general, or escalate)
     2. Routes to RAG responder or escalation handler
-    3. Returns the appropriate response
+    3. Returns the appropriate response with metadata
     
     Args:
-        request: ChatRequest with user query
+        request: ChatRequest with user query and optional conversation history
         
     Returns:
-        ChatResponse with chatbot answer
+        ChatResponse with chatbot answer and category
     """
     try:
-        print(f"\nReceived query: {request.query}")
+        logger.info(f"Received query: '{request.query[:100]}...'")
+        
+        # Convert history to dict format if provided
+        history_list = None
+        if request.history:
+            history_list = [msg.dict() for msg in request.history]
+            logger.info(f"Request includes {len(history_list)} history messages")
         
         # Run the LangGraph workflow
-        response = run_chatbot_flow(request.query)
+        result = run_chatbot_flow(request.query, history_list)
         
-        print(f"Generated response: {response[:100]}...")
+        response_text = result.get("response", "")
+        category = result.get("category", "")
         
-        return ChatResponse(response=response)
+        logger.info(f"Generated response | Category: {category} | Response length: {len(response_text)} chars")
+        
+        return ChatResponse(
+            response=response_text,
+            category=category
+        )
     
     except Exception as e:
-        print(f"Error processing query: {e}")
+        logger.error(f"Error processing query: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error processing your query: {str(e)}"
@@ -181,13 +220,23 @@ async def chat_direct(request: ChatRequest):
     try:
         from rag_pipeline import answer_with_rag
         
-        print(f"\nDirect RAG query: {request.query}")
-        response = answer_with_rag(request.query)
+        logger.info(f"Direct RAG query: '{request.query[:100]}...'")
         
-        return ChatResponse(response=response)
+        # Convert history to string if provided
+        history_str = ""
+        if request.history:
+            history_lines = []
+            for msg in request.history[-4:]:
+                sender = "User" if msg.sender == "user" else "Bot"
+                history_lines.append(f"{sender}: {msg.text}")
+            history_str = "\n".join(history_lines)
+        
+        response = answer_with_rag(request.query, history_str)
+        
+        return ChatResponse(response=response, category="direct")
     
     except Exception as e:
-        print(f"Error in direct RAG: {e}")
+        logger.error(f"Error in direct RAG: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Error processing your query: {str(e)}"

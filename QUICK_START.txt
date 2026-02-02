@@ -1,0 +1,106 @@
+╔════════════════════════════════════════════════════════════════╗
+║        TechGear Support Chatbot - Quick Start Guide           ║
+╚════════════════════════════════════════════════════════════════╝
+
+📍 LOCATION: /home/labuser/edurekaproject
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 QUICK START (Choose One)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1️⃣  Backend + Frontend (Full Experience)
+   Terminal 1:
+   $ cd /home/labuser/edurekaproject
+   $ ./venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+   Terminal 2:
+   $ cd /home/labuser/edurekaproject/frontend
+   $ npm run dev
+
+   → Open browser: http://localhost:5173
+
+2️⃣  Backend Only (API Testing)
+   $ cd /home/labuser/edurekaproject
+   $ ./venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+
+   Test with curl:
+   $ curl -X POST "http://localhost:8000/chat" \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What is the price of SmartWatch Pro X?"}'
+
+3️⃣  Demo Script (No Server)
+   $ cd /home/labuser/edurekaproject
+   $ ./venv/bin/python demo_queries.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✨ WHAT'S NEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Backend:
+  • Weak context detection → No more hallucinations
+  • Conversation history → "What is its price?" works
+  • Enhanced classification → Better routing
+  • Response metadata → Category included
+  • Structured logging → Full observability
+
+Frontend:
+  • Timestamps on all messages
+  • Category labels on bot responses
+  • Clear Chat button
+  • History sent automatically
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 TEST SCENARIOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Try these queries:
+
+✓ "What is the price of SmartWatch Pro X?"
+  → Category: products
+
+✓ "What is your return policy?"
+  → Category: returns
+
+✓ "When is support available?"
+  → Category: general
+
+✓ "My laptop screen is broken"
+  → Category: escalate
+
+✓ "What is the weather today?"
+  → Fallback message (out of KB)
+
+✓ Follow-up test:
+  1. "Tell me about SmartWatch Pro X"
+  2. "What is its price?"
+  → Should understand context
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  UPGRADE_SUMMARY.md  → Full overview of changes
+  TESTING_GUIDE.md    → Detailed testing steps
+  BEFORE_AFTER.md     → Visual comparisons
+  README.md           → Original docs
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Port 8000 in use?
+  $ pkill -f "uvicorn main:app"
+
+Check if server is running:
+  $ ps aux | grep uvicorn
+
+View server logs:
+  → Terminal where server is running
+
+Frontend not connecting?
+  → Ensure backend is on port 8000
+  → Check CORS settings in main.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ All features implemented and ready to test!
