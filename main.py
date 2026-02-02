@@ -43,6 +43,7 @@ SETUP INSTRUCTIONS:
 """
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
 import uvicorn
@@ -55,6 +56,15 @@ app = FastAPI(
     title="TechGear Electronics Support Chatbot",
     description="RAG-powered customer support chatbot using ChromaDB, LangChain, LangGraph, and Gemini Flash 2.5",
     version="1.0.0"
+)
+
+# Configure CORS for frontend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
