@@ -13,7 +13,7 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY environment variable is not set!")
 
 # Model Configuration
-GEMINI_MODEL = "gemini-2.0-flash-exp"  # Gemini Flash 2.5 model
+GEMINI_MODEL = "gemini-2.5-flash"  # Gemini 2.5 Flash model
 EMBEDDING_MODEL = "models/embedding-001"  # Google's embedding model
 
 # Document Configuration

@@ -4,13 +4,19 @@ TASK 3: LangGraph Workflow Implementation
 - Conditional routing
 - RAG response or escalation
 """
-from typing import Dict, Literal
-from langgraph.graph import Graph, END
+from typing import Dict, Literal, TypedDict
+from langgraph.graph import StateGraph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 import config
 from rag_pipeline import answer_with_rag
+
+
+class GraphState(TypedDict):
+    query: str
+    category: str
+    response: str
 
 
 class ChatbotWorkflow:
@@ -128,15 +134,15 @@ Category:""",
         else:
             return "rag_responder"
     
-    def _build_graph(self) -> Graph:
+    def _build_graph(self) -> StateGraph:
         """
         Build the LangGraph workflow with nodes and edges.
         
         Returns:
             Compiled workflow graph
         """
-        # Create the graph
-        workflow = Graph()
+        # Create the graph with state schema
+        workflow = StateGraph(GraphState)
         
         # Add nodes
         workflow.add_node("classifier", self.classify_query)

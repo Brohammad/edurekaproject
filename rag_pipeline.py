@@ -5,12 +5,13 @@ TASK 1 & 2: RAG Pipeline Implementation
 """
 import os
 from typing import List
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
-from langchain.schema import Document
+from langchain_chroma import Chroma
+from langchain_core.prompts import PromptTemplate
+from langchain_core.documents import Document
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 import config
 
@@ -117,8 +118,7 @@ class RAGPipeline:
         self.llm = ChatGoogleGenerativeAI(
             model=config.GEMINI_MODEL,
             google_api_key=config.GOOGLE_API_KEY,
-            temperature=0.3,
-            convert_system_message_to_human=True
+            temperature=0.3
         )
         
         # Create custom prompt for RAG
@@ -132,18 +132,20 @@ Question: {question}
 
 Answer:"""
         
-        PROMPT = PromptTemplate(
+        self.prompt = PromptTemplate(
             template=prompt_template,
             input_variables=["context", "question"]
         )
         
-        # Create RetrievalQA chain
-        self.rag_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.retriever,
-            return_source_documents=False,
-            chain_type_kwargs={"prompt": PROMPT}
+        # Create RAG chain using LCEL
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+        
+        self.rag_chain = (
+            {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
+            | self.prompt
+            | self.llm
+            | StrOutputParser()
         )
         
         print("RAG chain setup complete!")
@@ -161,8 +163,8 @@ Answer:"""
         if self.rag_chain is None:
             raise ValueError("RAG chain not initialized. Call setup_rag_chain() first.")
         
-        result = self.rag_chain.invoke({"query": question})
-        return result["result"]
+        result = self.rag_chain.invoke(question)
+        return result
 
 
 # Global instance
