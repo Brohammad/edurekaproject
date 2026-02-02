@@ -4,20 +4,13 @@ TASK 3: LangGraph Workflow Implementation
 - Conditional routing
 - RAG response or escalation
 """
-from typing import TypedDict, Literal
+from typing import Dict, Literal
 from langgraph.graph import Graph, END
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import PromptTemplate
 
 import config
 from rag_pipeline import answer_with_rag
-
-
-class WorkflowState(TypedDict):
-    """State object for the LangGraph workflow."""
-    query: str
-    category: str
-    response: str
 
 
 class ChatbotWorkflow:
@@ -33,7 +26,7 @@ class ChatbotWorkflow:
         )
         self.graph = self._build_graph()
     
-    def classify_query(self, state: WorkflowState) -> WorkflowState:
+    def classify_query(self, state: Dict) -> Dict:
         """
         Node 1: Classifier
         Categorize the user query into one of: products, returns, general, or escalate.
@@ -44,7 +37,7 @@ class ChatbotWorkflow:
         Returns:
             Updated state with category
         """
-        query = state["query"]
+        query = state.get("query", "")
         
         # Classification prompt
         classification_prompt = PromptTemplate(
@@ -77,7 +70,7 @@ Category:""",
         state["category"] = category
         return state
     
-    def rag_responder(self, state: WorkflowState) -> WorkflowState:
+    def rag_responder(self, state: Dict) -> Dict:
         """
         Node 2: RAG Responder
         Use the RAG chain to generate a response based on retrieved context.
@@ -88,7 +81,7 @@ Category:""",
         Returns:
             Updated state with response
         """
-        query = state["query"]
+        query = state.get("query", "")
         
         print("Generating response using RAG...")
         response = answer_with_rag(query)
@@ -96,7 +89,7 @@ Category:""",
         state["response"] = response
         return state
     
-    def escalation_handler(self, state: WorkflowState) -> WorkflowState:
+    def escalation_handler(self, state: Dict) -> Dict:
         """
         Node 3: Escalation
         Return a fixed escalation message for queries that need human support.
@@ -118,7 +111,7 @@ Category:""",
         state["response"] = escalation_message
         return state
     
-    def route_query(self, state: WorkflowState) -> Literal["rag_responder", "escalation_handler"]:
+    def route_query(self, state: Dict) -> Literal["rag_responder", "escalation_handler"]:
         """
         Conditional routing based on classification.
         
@@ -181,16 +174,16 @@ Category:""",
             Chatbot response
         """
         # Initialize state
-        initial_state = WorkflowState(
-            query=query,
-            category="",
-            response=""
-        )
+        initial_state = {
+            "query": query,
+            "category": "",
+            "response": ""
+        }
         
         # Execute workflow
         final_state = self.graph.invoke(initial_state)
         
-        return final_state["response"]
+        return final_state.get("response", "")
 
 
 # Global workflow instance
