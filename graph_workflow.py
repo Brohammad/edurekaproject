@@ -1,0 +1,226 @@
+"""
+TASK 3: LangGraph Workflow Implementation
+- Query classification
+- Conditional routing
+- RAG response or escalation
+"""
+from typing import TypedDict, Literal
+from langgraph.graph import Graph, END
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.prompts import PromptTemplate
+
+import config
+from rag_pipeline import answer_with_rag
+
+
+class WorkflowState(TypedDict):
+    """State object for the LangGraph workflow."""
+    query: str
+    category: str
+    response: str
+
+
+class ChatbotWorkflow:
+    """LangGraph workflow for TechGear chatbot."""
+    
+    def __init__(self):
+        """Initialize the workflow with LLM for classification."""
+        self.llm = ChatGoogleGenerativeAI(
+            model=config.GEMINI_MODEL,
+            google_api_key=config.GOOGLE_API_KEY,
+            temperature=0.1,
+            convert_system_message_to_human=True
+        )
+        self.graph = self._build_graph()
+    
+    def classify_query(self, state: WorkflowState) -> WorkflowState:
+        """
+        Node 1: Classifier
+        Categorize the user query into one of: products, returns, general, or escalate.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated state with category
+        """
+        query = state["query"]
+        
+        # Classification prompt
+        classification_prompt = PromptTemplate(
+            template="""You are a query classifier for TechGear Electronics customer support.
+Classify the following customer query into EXACTLY ONE of these categories:
+- "products": Questions about product features, prices, specifications, warranty
+- "returns": Questions about return policy, refunds, return process
+- "general": Questions about support hours, contact information, general inquiries
+- "escalate": Complex issues, complaints, requests that need human intervention, or unclear queries
+
+Output ONLY the category name, nothing else.
+
+Query: {query}
+
+Category:""",
+            input_variables=["query"]
+        )
+        
+        prompt_text = classification_prompt.format(query=query)
+        result = self.llm.invoke(prompt_text)
+        category = result.content.strip().lower()
+        
+        # Validate category
+        valid_categories = ["products", "returns", "general", "escalate"]
+        if category not in valid_categories:
+            # Default to escalate if unclear
+            category = "escalate"
+        
+        print(f"Classified query as: {category}")
+        state["category"] = category
+        return state
+    
+    def rag_responder(self, state: WorkflowState) -> WorkflowState:
+        """
+        Node 2: RAG Responder
+        Use the RAG chain to generate a response based on retrieved context.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated state with response
+        """
+        query = state["query"]
+        
+        print("Generating response using RAG...")
+        response = answer_with_rag(query)
+        
+        state["response"] = response
+        return state
+    
+    def escalation_handler(self, state: WorkflowState) -> WorkflowState:
+        """
+        Node 3: Escalation
+        Return a fixed escalation message for queries that need human support.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Updated state with escalation message
+        """
+        print("Escalating to human support...")
+        
+        escalation_message = (
+            "I'm not able to handle this request. "
+            "Please contact support@techgear.com or call customer support "
+            "for further assistance. Our support team is available Mon-Sat, 9AM-6PM IST."
+        )
+        
+        state["response"] = escalation_message
+        return state
+    
+    def route_query(self, state: WorkflowState) -> Literal["rag_responder", "escalation_handler"]:
+        """
+        Conditional routing based on classification.
+        
+        Args:
+            state: Current workflow state
+            
+        Returns:
+            Next node name
+        """
+        category = state.get("category", "escalate")
+        
+        if category == "escalate":
+            return "escalation_handler"
+        else:
+            return "rag_responder"
+    
+    def _build_graph(self) -> Graph:
+        """
+        Build the LangGraph workflow with nodes and edges.
+        
+        Returns:
+            Compiled workflow graph
+        """
+        # Create the graph
+        workflow = Graph()
+        
+        # Add nodes
+        workflow.add_node("classifier", self.classify_query)
+        workflow.add_node("rag_responder", self.rag_responder)
+        workflow.add_node("escalation_handler", self.escalation_handler)
+        
+        # Set entry point
+        workflow.set_entry_point("classifier")
+        
+        # Add conditional routing from classifier
+        workflow.add_conditional_edges(
+            "classifier",
+            self.route_query,
+            {
+                "rag_responder": "rag_responder",
+                "escalation_handler": "escalation_handler"
+            }
+        )
+        
+        # Both response nodes lead to END
+        workflow.add_edge("rag_responder", END)
+        workflow.add_edge("escalation_handler", END)
+        
+        # Compile the graph
+        return workflow.compile()
+    
+    def run(self, query: str) -> str:
+        """
+        Run the workflow for a given query.
+        
+        Args:
+            query: User's question
+            
+        Returns:
+            Chatbot response
+        """
+        # Initialize state
+        initial_state = WorkflowState(
+            query=query,
+            category="",
+            response=""
+        )
+        
+        # Execute workflow
+        final_state = self.graph.invoke(initial_state)
+        
+        return final_state["response"]
+
+
+# Global workflow instance
+_workflow = None
+
+
+def get_workflow() -> ChatbotWorkflow:
+    """
+    Get or create the global workflow instance.
+    
+    Returns:
+        ChatbotWorkflow instance
+    """
+    global _workflow
+    if _workflow is None:
+        print("Initializing LangGraph workflow...")
+        _workflow = ChatbotWorkflow()
+        print("Workflow initialized!")
+    return _workflow
+
+
+def run_chatbot_flow(query: str) -> str:
+    """
+    Convenience function to run the chatbot workflow.
+    
+    Args:
+        query: User's question
+        
+    Returns:
+        Chatbot response
+    """
+    workflow = get_workflow()
+    return workflow.run(query)
